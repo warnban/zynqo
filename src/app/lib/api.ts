@@ -61,7 +61,7 @@ export const api = {
 
   chat: (body: { modelId: string; messages: ChatMessage[] }) =>
     request<{ reply: string; cost: number; balance: number }>("/generate/chat", { method: "POST", body }),
-  image: (body: { modelId: string; prompt: string; size?: string }) =>
+  image: (body: { modelId: string; prompt: string; size?: string; referenceImage?: string }) =>
     request<{ url: string; cost: number; balance: number }>("/generate/image", { method: "POST", body }),
   video: (body: { modelId: string; prompt: string; presetId?: string; seconds?: number }) =>
     request<{ url: string; note?: string; cost: number; balance: number }>("/generate/video", { method: "POST", body }),

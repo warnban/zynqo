@@ -100,14 +100,19 @@ export function Card({ children, title }: { children: React.ReactNode; title?: s
 }
 
 export function UploadZone({
-  label, accept, hint, onFile,
+  label, accept, hint, onFile, previewUrl,
 }: {
-  label: string; accept: string; hint?: string; onFile?: (file: File | null) => void;
+  label: string; accept: string; hint?: string; onFile?: (file: File | null) => void; previewUrl?: string | null;
 }) {
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<string | null>(null);
   const ref = useRef<HTMLInputElement>(null);
-  const set = (f: File | null) => { setFile(f?.name ?? null); onFile?.(f); };
+  const set = (f: File | null) => {
+    setFile(f?.name ?? null);
+    onFile?.(f);
+    if (!f && ref.current) ref.current.value = "";
+  };
+  const showPreview = previewUrl && file;
   return (
     <div>
       <FieldLabel hint={hint}>{label}</FieldLabel>
@@ -124,7 +129,18 @@ export function UploadZone({
           ref={ref} type="file" accept={accept} className="hidden"
           onChange={(e) => { if (e.target.files?.[0]) set(e.target.files[0]); }}
         />
-        {file ? (
+        {showPreview ? (
+          <>
+            <img src={previewUrl} alt="" className="max-h-40 rounded-xl object-contain" />
+            <span className="text-sm font-medium text-foreground">{file}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); set(null); }}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
+            >
+              <X size={12} /> Убрать
+            </button>
+          </>
+        ) : file ? (
           <>
             <span className="text-sm font-medium text-foreground">{file}</span>
             <button

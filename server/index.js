@@ -264,15 +264,19 @@ app.post("/api/generate/chat", requireAuth, async (req, res) => {
 
 // Фото: фиксированная цена (холд → списание/возврат).
 app.post("/api/generate/image", requireAuth, async (req, res) => {
-  const { modelId, prompt, size } = req.body || {};
+  const { modelId, prompt, size, referenceImage } = req.body || {};
   const model = getModel(modelId, db.getMarkup());
   if (!model || model.kind !== "image") return res.status(400).json({ error: "Неизвестная модель изображения" });
-  if (!prompt?.trim()) return res.status(400).json({ error: "Опишите изображение" });
+  if (!prompt?.trim()) return res.status(400).json({ error: "Опишите изображение или изменения" });
+  if (referenceImage && typeof referenceImage === "string" && referenceImage.length > 20 * 1024 * 1024) {
+    return res.status(400).json({ error: "Изображение слишком большое (макс. ~15 МБ)" });
+  }
 
   const cost = model.pricing.perImage;
   const tunnelCost = tunnelCostFor(modelId, { retailCost: cost });
-  await runMediaJob(req, res, { model, modelId, kind: "image", prompt, cost, tunnelCost }, () =>
-    ai.image({ apiName: model.apiName, prompt, size }),
+  const promptLog = referenceImage ? `${prompt.trim()} [референс]` : prompt.trim();
+  await runMediaJob(req, res, { model, modelId, kind: "image", prompt: promptLog, cost, tunnelCost }, () =>
+    ai.image({ apiName: model.apiName, prompt: prompt.trim(), size, referenceImage: referenceImage || undefined }),
   );
 });
 

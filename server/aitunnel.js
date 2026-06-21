@@ -48,14 +48,77 @@ export async function chat({ apiName, messages }) {
 
 // ─── Фото ────────────────────────────────────────────────────────────────────
 
-export async function image({ apiName, prompt, size }) {
+function parseDataUrl(dataUrl) {
+  const m = /^data:([^;]+);base64,(.+)$/.exec(String(dataUrl || ""));
+  if (!m) throw new Error("Неверный формат изображения");
+  return { mime: m[1], buffer: Buffer.from(m[2], "base64") };
+}
+
+function sizeToAspectRatio(size) {
+  return ({ "1024x1024": "1:1", "1024x1792": "9:16", "1792x1024": "16:9" })[size] || "1:1";
+}
+
+function sizeToOpenAiEdit(size) {
+  return ({ "1024x1024": "1024x1024", "1024x1792": "1024x1536", "1792x1024": "1536x1024" })[size] || "1024x1024";
+}
+
+/** Для /images/edits у Gemini в доке — *-preview id. */
+function resolveEditModel(apiName) {
+  const map = {
+    "gemini-3.1-flash-image": "gemini-3.1-flash-image-preview",
+    "gemini-3-pro-image": "gemini-3-pro-image-preview",
+  };
+  return map[apiName] || apiName;
+}
+
+function isGeminiImage(apiName) {
+  return /gemini.*image/i.test(apiName);
+}
+
+function extractImageItem(data) {
+  const item = data?.data?.[0] || {};
+  return item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : null);
+}
+
+export async function image({ apiName, prompt, size, referenceImage }) {
+  if (referenceImage) {
+    return imageEdit({ apiName, prompt, size, referenceImage });
+  }
   if (isDemo()) {
     await sleep(900);
     return { url: demoImage(prompt) };
   }
   const data = await postJson("/images/generations", { model: apiName, prompt, n: 1, size: size || "1024x1024" });
-  const item = data.data?.[0] || {};
-  return { url: item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : null) };
+  return { url: extractImageItem(data) };
+}
+
+/** Редактирование / генерация по референсу — POST /v1/images/edits (multipart). */
+export async function imageEdit({ apiName, prompt, size, referenceImage }) {
+  if (isDemo()) {
+    await sleep(900);
+    return { url: demoImage(`${prompt} (референс)`) };
+  }
+  const { mime, buffer } = parseDataUrl(referenceImage);
+  const ext = mime.includes("jpeg") ? "jpg" : mime.includes("webp") ? "webp" : "png";
+  const model = resolveEditModel(apiName);
+  const form = new FormData();
+  form.append("model", model);
+  form.append("prompt", prompt);
+  form.append("image", new Blob([buffer], { type: mime }), `reference.${ext}`);
+  if (isGeminiImage(apiName)) {
+    form.append("image_config", JSON.stringify({ aspect_ratio: sizeToAspectRatio(size), image_size: "2K" }));
+  } else {
+    form.append("size", sizeToOpenAiEdit(size));
+  }
+  const res = await fetch(`${BASE()}/images/edits`, { method: "POST", headers: authHeaders(), body: form });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`AI Tunnel ${res.status}: ${text.slice(0, 300)}`);
+  }
+  const data = await res.json();
+  const url = extractImageItem(data);
+  if (!url) throw new Error("Модель не вернула изображение");
+  return { url };
 }
 
 // ─── Видео (асинхронно: создать → опрашивать → ссылка) ───────────────────────

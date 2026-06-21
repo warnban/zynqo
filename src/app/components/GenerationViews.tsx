@@ -242,20 +242,49 @@ function MessageContent({ content }: { content: string | ChatPart[] }) {
 
 // ─── Фото ─────────────────────────────────────────────────────────────────────
 
-function ImageView({ model, balance, onBalance, onNeedTopUp, confirm }: GenProps) {
+function ImageView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm }: GenProps) {
   const pricing = model.pricing as ImagePricing;
   const [prompt, setPrompt] = useState("");
   const [size, setSize] = useState<"1024x1024" | "1024x1792" | "1792x1024">("1024x1024");
+  const [reference, setReference] = useState<{ file: File; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const onReference = async (file: File | null) => {
+    if (!file) { setReference(null); return; }
+    if (!file.type.startsWith("image/")) {
+      setError("Можно прикрепить только изображение (JPG, PNG, WebP)");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Максимальный размер файла — 10 МБ");
+      return;
+    }
+    try {
+      const url = await fileToDataUrl(file);
+      setReference({ file, url });
+      setError(null);
+    } catch {
+      setError("Не удалось прочитать изображение");
+    }
+  };
+
   const onGenerate = async () => {
     if (!prompt.trim()) return;
-    if (!(await confirm(pricing.perImage, `Фото · ${model.name}`))) return;
+    if (!onNeedAuth()) return;
+    const title = reference
+      ? `Редактирование · ${model.name}`
+      : `Фото · ${model.name}`;
+    if (!(await confirm(pricing.perImage, title))) return;
     setError(null); setResult(null); setBusy(true);
     try {
-      const res = await api.image({ modelId: model.id, prompt, size });
+      const res = await api.image({
+        modelId: model.id,
+        prompt: prompt.trim(),
+        size,
+        referenceImage: reference?.url,
+      });
       setResult(res.url); onBalance(res.balance);
     } catch (e) { setError(handleError(e, onNeedTopUp)); } finally { setBusy(false); }
   };
@@ -263,9 +292,24 @@ function ImageView({ model, balance, onBalance, onNeedTopUp, confirm }: GenProps
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
       <div className="space-y-4">
-        <Card title="Что нарисовать">
-          <Textarea placeholder="Опишите картинку: «рыжий кот в космическом шлеме, акварель, мягкий свет»…" value={prompt} onChange={setPrompt} rows={5} hint="Чем подробнее описание, тем точнее результат." />
+        <Card title={reference ? "Что изменить на фото" : "Что нарисовать"}>
+          <Textarea
+            placeholder={reference
+              ? "Опишите изменения: «замени фон на закат», «добавь солнечные очки», «перерисуй в акварель»…"
+              : "Опишите картинку: «рыжий кот в космическом шлеме, акварель, мягкий свет»…"}
+            value={prompt}
+            onChange={setPrompt}
+            rows={5}
+            hint={reference ? "Референс загружен — модель отредактирует его по вашему описанию." : "Чем подробнее описание, тем точнее результат."}
+          />
         </Card>
+        <UploadZone
+          label="Референс (необязательно)"
+          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          hint="Загрузите фото — Gemini изменит его по описанию (редактирование, стиль, фон)."
+          onFile={onReference}
+          previewUrl={reference?.url}
+        />
         <ResultBox kind="image" busy={busy} url={result} />
         {error && <ErrorNote text={error} />}
       </div>
