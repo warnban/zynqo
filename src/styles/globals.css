@@ -9,3 +9,32 @@
 }
 .aneuro-overlay { animation: aneuro-overlay-in 0.15s ease-out; }
 .aneuro-pop { animation: aneuro-pop-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Скроллбары под светлую / тёмную тему (Firefox + WebKit) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--scrollbar-track);
+}

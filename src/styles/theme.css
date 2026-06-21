@@ -40,6 +40,9 @@
   --sidebar-accent-foreground: #1c1c22;
   --sidebar-border: #e7e7eb;
   --sidebar-ring: #6d28d9;
+  --scrollbar-track: #ececef;
+  --scrollbar-thumb: #c2c2cc;
+  --scrollbar-thumb-hover: #a8a8b4;
 }
 
 .dark {
@@ -80,6 +83,9 @@
   --sidebar-accent-foreground: #ededf2;
   --sidebar-border: rgba(255, 255, 255, 0.07);
   --sidebar-ring: #8b5cf6;
+  --scrollbar-track: #121218;
+  --scrollbar-thumb: #2e2e3a;
+  --scrollbar-thumb-hover: #3d3d4c;
 }
 
 @theme inline {
