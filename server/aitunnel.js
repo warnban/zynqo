@@ -123,23 +123,40 @@ export async function imageEdit({ apiName, prompt, size, referenceImage }) {
 
 // ─── Видео (асинхронно: создать → опрашивать → ссылка) ───────────────────────
 
-export async function video({ apiName, prompt, size, duration }) {
+export async function video({ apiName, prompt, size, duration, referenceImage }) {
   if (isDemo()) {
     await sleep(1500);
     return { url: "demo://video", note: "Демо-режим: добавьте ключ AI Tunnel для реальной генерации видео." };
   }
-  const job = await postJson("/videos", { model: apiName, prompt, size: size || "1280x720", duration: duration || 5 });
+  const body = {
+    model: apiName,
+    prompt,
+    size: size || "1280x720",
+    duration: duration || 5,
+  };
+  if (referenceImage) {
+    body.frame_images = [{
+      type: "image_url",
+      image_url: { url: referenceImage },
+      frame_type: "first_frame",
+    }];
+  }
+  const job = await postJson("/videos", body);
   let state = job;
-  const pollUrl = job.polling_url;
-  const deadline = Date.now() + 5 * 60 * 1000; // максимум 5 минут
+  const pollUrl = job.polling_url?.startsWith("http")
+    ? job.polling_url
+    : `${BASE()}/videos/${job.id}`;
+  const deadline = Date.now() + 8 * 60 * 1000;
   while (state.status !== "completed" && state.status !== "failed") {
     if (Date.now() > deadline) throw new Error("Превышено время ожидания видео");
-    await sleep(5000);
+    await sleep(15000);
     const res = await fetch(pollUrl, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`AI Tunnel ${res.status}: ${(await res.text()).slice(0, 200)}`);
     state = await res.json();
   }
   if (state.status === "failed") throw new Error(state.error || "Генерация видео не удалась");
-  return { url: state.unsigned_urls?.[0] || null };
+  const url = state.unsigned_urls?.[0] || `${BASE()}/videos/${state.id}/content?index=0`;
+  return { url };
 }
 
 // ─── Аудио → текст ────────────────────────────────────────────────────────────

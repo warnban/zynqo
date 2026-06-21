@@ -282,18 +282,22 @@ app.post("/api/generate/image", requireAuth, async (req, res) => {
 
 // Видео: цена по пресету/длительности.
 app.post("/api/generate/video", requireAuth, async (req, res) => {
-  const { modelId, prompt, presetId, seconds } = req.body || {};
+  const { modelId, prompt, presetId, seconds, referenceImage } = req.body || {};
   const model = getModel(modelId, db.getMarkup());
   if (!model || model.kind !== "video") return res.status(400).json({ error: "Неизвестная модель видео" });
   if (!prompt?.trim()) return res.status(400).json({ error: "Опишите сцену" });
+  if (referenceImage && typeof referenceImage === "string" && referenceImage.length > 20 * 1024 * 1024) {
+    return res.status(400).json({ error: "Изображение слишком большое (макс. ~15 МБ)" });
+  }
 
   const cost = videoCost(model.pricing, { presetId, seconds });
   const preset = model.pricing.presets?.[presetId];
   const size = preset?.size || model.pricing.size;
   const dur = preset?.seconds || seconds || 5;
   const tunnelCost = tunnelCostFor(modelId, { presetId, seconds: dur, retailCost: cost });
-  await runMediaJob(req, res, { model, modelId, kind: "video", prompt, cost, tunnelCost }, () =>
-    ai.video({ apiName: model.apiName, prompt, size, duration: dur }),
+  const promptLog = referenceImage ? `${prompt.trim()} [фото-референс]` : prompt.trim();
+  await runMediaJob(req, res, { model, modelId, kind: "video", prompt: promptLog, cost, tunnelCost }, () =>
+    ai.video({ apiName: model.apiName, prompt: prompt.trim(), size, duration: dur, referenceImage: referenceImage || undefined }),
   );
 });
 
@@ -331,7 +335,7 @@ async function runMediaJob(req, res, { model, modelId, kind, prompt, cost, tunne
       result: result.text ? result.text.slice(0, 4000) : result.url,
       durationMs: Date.now() - t0,
     });
-    res.json({ ...result, cost, balance: hold.balance });
+    res.json({ ...result, mediaId: genId, cost, balance: hold.balance });
   } catch (e) {
     const balance = db.credit(req.user.id, cost, "refund", `Возврат · ${model.name}`);
     db.finishGeneration(genId, { status: "error", error: String(e.message), durationMs: Date.now() - t0 });
@@ -343,6 +347,44 @@ const kindTitle = (k) => ({ image: "Фото", video: "Видео", transcribe: 
 
 app.get("/api/generations", requireAuth, (req, res) => {
   res.json({ generations: db.getGenerations(req.user.id) });
+});
+
+/** Прокси медиа (видео/фото) — AI Tunnel требует Authorization, браузер напрямую не может. */
+app.get("/api/media/:id", requireAuth, async (req, res) => {
+  const gen = db.getGenerationById(req.params.id);
+  if (!gen || gen.user_id !== req.user.id) return res.status(404).json({ error: "Файл не найден" });
+  if (gen.status !== "done" || !gen.result) return res.status(404).json({ error: "Нет результата" });
+
+  const raw = gen.result;
+  const ext = gen.kind === "video" ? "mp4" : gen.kind === "image" ? "png" : "bin";
+  const filename = `zynqo-${gen.id.slice(0, 8)}.${ext}`;
+
+  try {
+    if (raw.startsWith("data:")) {
+      const m = /^data:([^;]+);base64,(.+)$/.exec(raw);
+      if (!m) return res.status(400).json({ error: "Неверный формат data URL" });
+      const buf = Buffer.from(m[2], "base64");
+      res.setHeader("Content-Type", m[1]);
+      if (req.query.download) res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      else res.setHeader("Cache-Control", "private, max-age=3600");
+      return res.send(buf);
+    }
+
+    const headers = {};
+    if (/aitunnel\.ru/i.test(raw)) headers.Authorization = `Bearer ${process.env.AITUNNEL_API_KEY || ""}`;
+    const upstream = await fetch(raw, { headers });
+    if (!upstream.ok) {
+      return res.status(502).json({ error: "Не удалось загрузить файл с сервера модели" });
+    }
+    const ct = upstream.headers.get("content-type")
+      || (gen.kind === "video" ? "video/mp4" : "image/png");
+    res.setHeader("Content-Type", ct);
+    if (req.query.download) res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    else res.setHeader("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(await upstream.arrayBuffer()));
+  } catch (e) {
+    res.status(502).json({ error: "Ошибка загрузки медиа: " + e.message });
+  }
 });
 
 // ─── Поддержка (клиент) ───────────────────────────────────────────────────────

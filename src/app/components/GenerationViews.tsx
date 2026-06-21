@@ -1,13 +1,14 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Sparkles, RefreshCw, Send, MessageSquare, Image as ImageIcon,
   Film, FileText, Download, Wallet, AlertCircle, Paperclip, X as XIcon,
+  Maximize2, X,
 } from "lucide-react";
 import {
   type CatalogModel, formatRub, videoPrice, transcribePrice,
   type VideoPricing, type TranscribePricing, type ImagePricing, type ChatPricing,
 } from "../lib/catalog";
-import { api, ApiError, type ChatMessage, type ChatPart } from "../lib/api";
+import { api, ApiError, getToken, type ChatMessage, type ChatPart } from "../lib/api";
 
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -249,6 +250,7 @@ function ImageView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm
   const [reference, setReference] = useState<{ file: File; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [mediaId, setMediaId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const onReference = async (file: File | null) => {
@@ -277,7 +279,7 @@ function ImageView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm
       ? `Редактирование · ${model.name}`
       : `Фото · ${model.name}`;
     if (!(await confirm(pricing.perImage, title))) return;
-    setError(null); setResult(null); setBusy(true);
+    setError(null); setResult(null); setMediaId(null); setBusy(true);
     try {
       const res = await api.image({
         modelId: model.id,
@@ -285,7 +287,9 @@ function ImageView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm
         size,
         referenceImage: reference?.url,
       });
-      setResult(res.url); onBalance(res.balance);
+      setResult(res.url);
+      setMediaId(res.mediaId ?? null);
+      onBalance(res.balance);
     } catch (e) { setError(handleError(e, onNeedTopUp)); } finally { setBusy(false); }
   };
 
@@ -310,7 +314,7 @@ function ImageView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm
           onFile={onReference}
           previewUrl={reference?.url}
         />
-        <ResultBox kind="image" busy={busy} url={result} />
+        <MediaResult kind="image" busy={busy} url={result} mediaId={mediaId} />
         {error && <ErrorNote text={error} />}
       </div>
       <div className="space-y-4">
@@ -329,23 +333,53 @@ function ImageView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm
 
 // ─── Видео ────────────────────────────────────────────────────────────────────
 
-function VideoView({ model, balance, onBalance, onNeedTopUp, confirm }: GenProps) {
+function VideoView({ model, balance, onBalance, onNeedTopUp, onNeedAuth, confirm }: GenProps) {
   const pricing = model.pricing as VideoPricing;
   const [prompt, setPrompt] = useState("");
   const [presetId, setPresetId] = useState(pricing.presets?.[0]?.id ?? "");
   const [seconds, setSeconds] = useState(5);
+  const [reference, setReference] = useState<{ file: File; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ url: string; note?: string } | null>(null);
+  const [mediaId, setMediaId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const price = videoPrice(pricing, { presetId, seconds });
 
+  const onReference = async (file: File | null) => {
+    if (!file) { setReference(null); return; }
+    if (!file.type.startsWith("image/")) {
+      setError("Можно прикрепить только изображение (JPG, PNG, WebP)");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setError("Максимальный размер файла — 10 МБ");
+      return;
+    }
+    try {
+      const url = await fileToDataUrl(file);
+      setReference({ file, url });
+      setError(null);
+    } catch {
+      setError("Не удалось прочитать изображение");
+    }
+  };
+
   const onGenerate = async () => {
     if (!prompt.trim()) return;
+    if (!onNeedAuth()) return;
     if (!(await confirm(price, `Видео · ${model.name}`))) return;
-    setError(null); setResult(null); setBusy(true);
+    setError(null); setResult(null); setMediaId(null); setBusy(true);
     try {
-      const res = await api.video({ modelId: model.id, prompt, presetId: presetId || undefined, seconds });
-      setResult({ url: res.url, note: res.note }); onBalance(res.balance);
+      const res = await api.video({
+        modelId: model.id,
+        prompt: prompt.trim(),
+        presetId: presetId || undefined,
+        seconds,
+        referenceImage: reference?.url,
+      });
+      setResult({ url: res.url, note: res.note });
+      setMediaId(res.mediaId ?? null);
+      onBalance(res.balance);
     } catch (e) { setError(handleError(e, onNeedTopUp)); } finally { setBusy(false); }
   };
 
@@ -355,8 +389,14 @@ function VideoView({ model, balance, onBalance, onNeedTopUp, confirm }: GenProps
         <Card title="Что показать в ролике">
           <Textarea placeholder="Опишите сцену: «дрон летит над осенним лесом на рассвете, туман, мягкий свет»…" value={prompt} onChange={setPrompt} rows={4} hint="Опишите действие, окружение и настроение." />
         </Card>
-        <UploadZone label="Оживить фото (необязательно)" accept=".jpg,.jpeg,.png" hint="Загрузите картинку — модель сделает из неё видео." />
-        <ResultBox kind="video" busy={busy} url={result?.url ?? null} note={result?.note} />
+        <UploadZone
+          label="Оживить фото (необязательно)"
+          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          hint="Загрузите фото — модель сделает из него видео (image-to-video)."
+          onFile={onReference}
+          previewUrl={reference?.url}
+        />
+        <MediaResult kind="video" busy={busy} url={result?.url ?? null} mediaId={mediaId} note={result?.note} />
         {error && <ErrorNote text={error} />}
       </div>
       <div className="space-y-4">
@@ -423,54 +463,204 @@ function TranscribeView({ model, balance, onBalance, onNeedTopUp, confirm }: Gen
   );
 }
 
-// ─── Блок результата ──────────────────────────────────────────────────────────
+// ─── Блок результата (фото / видео) ───────────────────────────────────────────
 
-function ResultBox({
-  kind, busy, url, text, note,
-}: { kind: "image" | "video" | "text"; busy: boolean; url?: string | null; text?: string | null; note?: string }) {
-  const icon = { image: <ImageIcon size={26} />, video: <Film size={26} />, text: <FileText size={26} /> }[kind];
+function useMediaSrc(mediaId: string | null | undefined, fallbackUrl: string | null | undefined) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (mediaId) {
+      let cancelled = false;
+      setLoading(true);
+      setError(false);
+      setSrc(null);
+      (async () => {
+        try {
+          const token = getToken();
+          const res = await fetch(`/api/media/${mediaId}`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (!res.ok) throw new Error(String(res.status));
+          const blob = await res.blob();
+          if (!cancelled) setSrc(URL.createObjectURL(blob));
+        } catch {
+          if (!cancelled) setError(true);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+      return () => {
+        cancelled = true;
+        setSrc((prev) => { if (prev?.startsWith("blob:")) URL.revokeObjectURL(prev); return null; });
+      };
+    }
+    setSrc(fallbackUrl ?? null);
+    setLoading(false);
+    setError(false);
+    return undefined;
+  }, [mediaId, fallbackUrl]);
+
+  return { src, loading, error };
+}
+
+function MediaResult({
+  kind, busy, url, mediaId, note,
+}: {
+  kind: "image" | "video"; busy: boolean; url?: string | null; mediaId?: string | null; note?: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const { src, loading, error } = useMediaSrc(mediaId, url);
+  const ext = kind === "video" ? "mp4" : "png";
+  const label = kind === "video" ? "видео" : "изображение";
+
+  const download = async () => {
+    if (mediaId) {
+      const token = getToken();
+      const res = await fetch(`/api/media/${mediaId}?download=1`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `zynqo-${Date.now()}.${ext}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      return;
+    }
+    if (src) {
+      const a = document.createElement("a");
+      a.href = src;
+      a.download = `zynqo-${Date.now()}.${ext}`;
+      a.click();
+    }
+  };
 
   if (busy) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-muted/40 min-h-64 p-6">
+      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-muted/40 min-h-72 p-8">
+        <RefreshCw size={28} className="text-primary animate-spin" />
+        <p className="text-sm text-muted-foreground">
+          {kind === "video" ? "Генерируем видео… Это может занять несколько минут." : "Создаём изображение…"}
+        </p>
+      </div>
+    );
+  }
+
+  if (!src && !loading && !note) {
+    const icon = kind === "video" ? <Film size={28} /> : <ImageIcon size={28} />;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-muted/40 min-h-72 p-8 text-center">
+        <div className="text-muted-foreground/40">{icon}</div>
+        <p className="text-sm text-muted-foreground">Результат появится здесь</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-border bg-card min-h-72 p-8">
+        <RefreshCw size={24} className="text-primary animate-spin" />
+        <p className="text-sm text-muted-foreground">Загружаем {label}…</p>
+      </div>
+    );
+  }
+
+  if (error || (!src && note)) {
+    return (
+      <div className="rounded-3xl border border-border bg-card p-6 text-center min-h-48 flex flex-col items-center justify-center gap-2">
+        <AlertCircle size={22} className="text-destructive" />
+        <p className="text-sm text-muted-foreground">{note || "Не удалось загрузить результат. Попробуйте сгенерировать снова."}</p>
+      </div>
+    );
+  }
+
+  if (!src) return null;
+
+  const mediaEl = kind === "video" ? (
+    <video
+      src={src}
+      controls
+      playsInline
+      preload="metadata"
+      className="w-full max-h-[min(70vh,520px)] object-contain rounded-2xl bg-black"
+    />
+  ) : (
+    <img src={src} alt="Результат" className="w-full max-h-[min(70vh,520px)] object-contain rounded-2xl bg-muted/30" />
+  );
+
+  return (
+    <>
+      <div className="rounded-3xl border border-border bg-card p-3 sm:p-4 shadow-sm space-y-3">
+        <div className="relative flex items-center justify-center overflow-hidden rounded-2xl bg-black/90 min-h-[200px]">
+          {mediaEl}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold bg-secondary text-foreground hover:bg-secondary/70 transition-all"
+          >
+            <Maximize2 size={15} /> На весь экран
+          </button>
+          <button
+            type="button"
+            onClick={download}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold text-primary-foreground bg-primary hover:opacity-90 transition-all"
+          >
+            <Download size={15} /> Скачать {kind === "video" ? "MP4" : "PNG"}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div
+          className="aneuro-overlay fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/90"
+          onClick={() => setExpanded(false)}
+        >
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="absolute top-4 right-4 h-10 w-10 rounded-xl bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors"
+          >
+            <X size={20} />
+          </button>
+          <div className="w-full max-w-5xl max-h-[90vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
+            {kind === "video" ? (
+              <video src={src} controls autoPlay playsInline className="w-full max-h-[90vh] object-contain rounded-xl" />
+            ) : (
+              <img src={src} alt="Результат" className="w-full max-h-[90vh] object-contain rounded-xl" />
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ResultBox({
+  kind, busy, text,
+}: { kind: "text"; busy: boolean; text?: string | null }) {
+  if (busy) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-muted/40 min-h-64 p-6">
         <RefreshCw size={26} className="text-primary animate-spin" />
         <p className="text-sm text-muted-foreground">Создаём результат…</p>
       </div>
     );
   }
-
-  if (kind === "image" && url) {
-    return (
-      <div className="rounded-3xl border border-border bg-card p-3 shadow-sm">
-        <img src={url} alt="результат" className="w-full rounded-2xl" />
-        <a href={url} download className="mt-3 flex items-center justify-center gap-1.5 text-sm text-primary hover:underline">
-          <Download size={14} /> Скачать
-        </a>
-      </div>
-    );
-  }
-  if (kind === "video" && (url || note)) {
-    return (
-      <div className="rounded-3xl border border-border bg-card p-4 shadow-sm text-center">
-        {url && url.startsWith("http") ? (
-          <video src={url} controls className="w-full rounded-2xl" />
-        ) : (
-          <p className="text-sm text-muted-foreground py-8">{note || "Видео сгенерировано"}</p>
-        )}
-      </div>
-    );
-  }
-  if (kind === "text" && text) {
+  if (text) {
     return (
       <div className="rounded-3xl border border-border bg-card p-5 shadow-sm">
         <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{text}</p>
       </div>
     );
   }
-
   return (
-    <div className="flex-1 flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-muted/40 min-h-64 p-6 text-center">
-      <div className="text-muted-foreground/40">{icon}</div>
+    <div className="flex flex-col items-center justify-center gap-3 rounded-3xl border border-dashed border-border bg-muted/40 min-h-64 p-6 text-center">
+      <div className="text-muted-foreground/40"><FileText size={26} /></div>
       <p className="text-sm text-muted-foreground">Результат появится здесь</p>
     </div>
   );

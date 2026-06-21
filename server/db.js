@@ -290,6 +290,10 @@ export function getGenerations(userId, limit = 50) {
   return db.prepare(`SELECT * FROM generations WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`).all(userId, limit);
 }
 
+export function getGenerationById(id) {
+  return db.prepare(`SELECT * FROM generations WHERE id = ?`).get(id);
+}
+
 // ─── Логи запросов ────────────────────────────────────────────────────────────
 
 export function logRequest({ userId, method, path: p, status, ip, ua, ms }) {
