@@ -1,0 +1,7 @@
+node_modules/
+.env
+aneuro.db
+aneuro.db-*
+zynqo.db
+zynqo.db-*
+*.log

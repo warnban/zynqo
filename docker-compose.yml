@@ -1,0 +1,47 @@
+services:
+  zynqo:
+    build: .
+    restart: unless-stopped
+    env_file: server/.env
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+      HOST: 0.0.0.0
+      STATIC_DIR: /app/dist
+      DATA_DIR: /app/data
+      SERVE_STATIC: "true"
+    volumes:
+      - zynqo_data:/app/data
+    ports:
+      - "8787:8787"
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8787/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["https"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      zynqo:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:-zynqo.ru}
+      ACME_EMAIL: ${ACME_EMAIL:-support@zynqo.ru}
+
+volumes:
+  zynqo_data:
+  caddy_data:
+  caddy_config:
