@@ -24,7 +24,8 @@ services:
       start_period: 15s
 
   caddy:
-    image: caddy:2-alpine
+    # GitHub Container Registry — без лимита Docker Hub
+    image: ghcr.io/caddyserver/caddy:2-alpine
     restart: unless-stopped
     profiles: ["https"]
     ports:
