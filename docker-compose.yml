@@ -24,8 +24,8 @@ services:
       start_period: 15s
 
   caddy:
-    # GitHub Container Registry — без лимита Docker Hub
-    image: ghcr.io/caddyserver/caddy:2-alpine
+    # Требует `docker login` (лимит Hub без авторизации). Запасной вариант: deploy/HOST-CADDY.ru.md
+    image: caddy:2-alpine
     restart: unless-stopped
     profiles: ["https"]
     ports:
